@@ -93,7 +93,7 @@ LLM Intent Router
 
 ### 1. Clone & Set Up Environment
 ```bash
-git clone https://github.com/your-org/data-mind-ai.git
+git clone https://github.com/hashi54/data-mind-ai.git
 cd data-mind-ai
 
 # Create virtual environment
