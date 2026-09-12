@@ -185,6 +185,7 @@ else:
             if not is_active:
                 if st.button(f"Set Active", key=f"activate_{tbl}"):
                     dataset_manager.set_active_dataset(tbl)
+                    st.session_state["active_dataset"] = tbl
                     st.success(f"'{tbl}' is now the active workspace dataset.")
                     st.rerun()
             else:

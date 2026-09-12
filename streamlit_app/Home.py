@@ -64,7 +64,7 @@ with st.sidebar:
     st.caption("AI-Powered Data Intelligence Platform")
     st.divider()
 
-    active_ds = dataset_manager.get_active_dataset_name()
+    active_ds = st.session_state.get("active_dataset") or dataset_manager.get_active_dataset_name()
     all_datasets = dataset_manager.list_datasets()
 
     st.markdown("#### 📂 Workspace")
