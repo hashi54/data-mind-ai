@@ -15,6 +15,28 @@ from app.analytics.dynamic_analytics import DynamicAnalyticsEngine
 from streamlit_app.components.cards import render_metric_card
 from app.ml.registry import registry
 from app.core.config import settings
+from app.database.seed_data import seed_database
+from app.rag.pipeline import RAGPipeline
+from app.core.logging import logger
+
+# ── One-Time Startup Initialization (runs once per Streamlit session/boot) ────
+# This ensures the database is seeded and RAG is indexed even when running
+# without FastAPI (e.g. Streamlit Cloud, standalone hosting)
+@st.cache_resource(show_spinner="⚙️ Initializing DataMind AI platform...")
+def _initialize_platform():
+    try:
+        seed_database()
+        logger.info("Database initialized and seeded via Streamlit startup.")
+    except Exception as e:
+        logger.error(f"Database seed error on Streamlit startup: {e}")
+    try:
+        RAGPipeline.index_knowledge_base()
+        logger.info("RAG knowledge base indexed via Streamlit startup.")
+    except Exception as e:
+        logger.error(f"RAG indexing error on Streamlit startup: {e}")
+    return True
+
+_initialize_platform()
 
 # ── Page Config ─────────────────────────────────────────────────────────────
 st.set_page_config(

@@ -7,6 +7,7 @@ if str(ROOT_DIR) not in sys.path:
 
 import streamlit as st
 import pandas as pd
+from app.database.seed_data import seed_database
 from app.ml.inference.churn_predictor import ChurnInferenceEngine
 from app.ml.inference.segmenter import CustomerSegmenterEngine
 from app.ml.inference.clv_predictor import CLVPredictorEngine
@@ -17,11 +18,27 @@ from streamlit_app.components.charts import plot_shap_waterfall
 
 st.set_page_config(page_title="Customer Intelligence | DataMind AI", page_icon="👥", layout="wide")
 
+# Ensure the database is seeded (needed for standalone Streamlit Cloud deployment)
+try:
+    seed_database()
+except Exception:
+    pass
+
 st.markdown("## 👥 Customer Intelligence & Explainable Churn Suite")
 st.caption("Machine learning churn risk scoring, SHAP explainability, RFM segmentation, and 12-month CLV projections")
 
 # Fetch Customers List for Interactive Selector
-cust_df = execute_query("SELECT customer_id, name, email, customer_segment, city, state FROM customers ORDER BY customer_id ASC;")
+try:
+    cust_df = execute_query("SELECT customer_id, name, email, customer_segment, city, state FROM customers ORDER BY customer_id ASC;")
+except Exception as e:
+    st.error("⚠️ Customer data is still loading. Please wait 10 seconds and refresh the page.")
+    st.info("💡 **Tip**: The database is being initialized for the first time on this server. This only takes a moment.")
+    st.stop()
+
+if cust_df is None or cust_df.empty:
+    st.warning("🚧 No customer records found. The database may still be seeding. Please refresh in 10 seconds.")
+    st.stop()
+
 cust_options = {f"#{row['customer_id']} — {row['name']} ({row['customer_segment']}, {row['city']})": row['customer_id'] for _, row in cust_df.iterrows()}
 
 selected_label = st.selectbox("Select Customer to Analyze:", options=list(cust_options.keys()), index=0)

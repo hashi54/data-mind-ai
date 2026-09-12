@@ -6,11 +6,18 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 import streamlit as st
+from app.database.seed_data import seed_database
 from app.llm.analyst_agent import BusinessAnalystOrchestrator
 from streamlit_app.components.chat_ui import render_chat_message
 
+# Ensure DB is seeded (for standalone Streamlit Cloud deployment)
+try:
+    seed_database()
+except Exception:
+    pass
 
 st.set_page_config(page_title="AI Business Analyst | DataMind AI", page_icon="🤖", layout="wide")
+
 
 st.markdown("## 🤖 AI Business Analyst & Intent Orchestrator")
 st.caption("Ask open-ended business questions — the platform automatically coordinates SQL agents, ML models, and policy RAG.")
