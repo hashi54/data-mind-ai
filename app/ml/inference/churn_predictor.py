@@ -14,7 +14,16 @@ class ChurnInferenceEngine:
     def predict(customer_id: Optional[int] = None, custom_features: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         champion_data = registry.get_model("churn_champion")
         if not champion_data:
-            raise ValueError("Churn model not registered. Please run model training first.")
+            logger.info("Churn model not found in registry. Auto-triggering training...")
+            try:
+                from app.ml.training.train_churn import train_customer_churn_models
+                train_customer_churn_models()
+                champion_data = registry.get_model("churn_champion")
+            except Exception as e:
+                logger.error(f"Auto-training churn model failed: {e}")
+
+        if not champion_data:
+            raise ValueError("Churn model not registered and could not be auto-trained. Please check server logs.")
 
         model = champion_data["model"]
         scaler = champion_data.get("scaler")

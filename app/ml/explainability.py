@@ -58,9 +58,16 @@ class ExplainableAIEngine:
             positive_factors.append(f"- Recent active purchase made within {int(days_since_order)} days")
 
         # Purchase frequency
-        if purchase_freq < 0.5:
+        if purchase_freq < 0.2:
             shap_values["purchase_frequency"] = 0.18
-            risk_factors.append("+ Significantly reduced purchase frequency (< 0.5 orders/month)")
+            risk_factors.append(f"+ Low purchase frequency ({purchase_freq:.2f} orders/month)")
+        elif purchase_freq < 0.5:
+            if base_probability >= 0.40:
+                shap_values["purchase_frequency"] = 0.12
+                risk_factors.append(f"+ Below-average purchase cadence ({purchase_freq:.2f} orders/month)")
+            else:
+                shap_values["purchase_frequency"] = 0.05
+                positive_factors.append(f"- Moderate purchase cadence ({purchase_freq:.2f} orders/month)")
         else:
             shap_values["purchase_frequency"] = -0.12
             positive_factors.append(f"- Consistent buying frequency ({purchase_freq:.1f} orders/month)")

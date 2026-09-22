@@ -29,7 +29,16 @@ class CustomerSegmenterEngine:
     def classify(customer_id: Optional[int] = None, rfm_values: Optional[Dict[str, float]] = None) -> Dict[str, Any]:
         model_data = registry.get_model("customer_segmentation_kmeans")
         if not model_data:
-            raise ValueError("Customer segmentation model not found. Run training first.")
+            logger.info("Customer segmentation model not found. Auto-triggering training...")
+            try:
+                from app.ml.training.train_segmentation import train_customer_segmentation
+                train_customer_segmentation()
+                model_data = registry.get_model("customer_segmentation_kmeans")
+            except Exception as e:
+                logger.error(f"Auto-training segmentation model failed: {e}")
+
+        if not model_data:
+            raise ValueError("Customer segmentation model not found and could not be auto-trained.")
 
         kmeans = model_data["model"]
         scaler = model_data["scaler"]
@@ -66,8 +75,8 @@ class CustomerSegmenterEngine:
         else:
             raise ValueError("Must specify either customer_id or rfm_values.")
 
-        vector = np.array([[rfm_dict[col] for col in feature_names]])
-        vector_scaled = scaler.transform(vector)
+        vector_df = pd.DataFrame([[rfm_dict[col] for col in feature_names]], columns=feature_names)
+        vector_scaled = scaler.transform(vector_df)
         cluster_id = int(kmeans.predict(vector_scaled)[0])
         segment_name = segment_map.get(cluster_id, "Standard")
 

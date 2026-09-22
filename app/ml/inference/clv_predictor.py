@@ -13,7 +13,16 @@ class CLVPredictorEngine:
     def predict(customer_id: Optional[int] = None, custom_features: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         model_data = registry.get_model("customer_clv_champion")
         if not model_data:
-            raise ValueError("CLV model not found in registry. Please run training first.")
+            logger.info("CLV model not found in registry. Auto-triggering training...")
+            try:
+                from app.ml.training.train_clv import train_clv_model
+                train_clv_model()
+                model_data = registry.get_model("customer_clv_champion")
+            except Exception as e:
+                logger.error(f"Auto-training CLV model failed: {e}")
+
+        if not model_data:
+            raise ValueError("CLV model not found in registry and could not be auto-trained.")
 
         model = model_data["model"]
         feature_names = model_data["feature_names"]

@@ -7,105 +7,262 @@ if str(ROOT_DIR) not in sys.path:
 
 import streamlit as st
 import pandas as pd
+import importlib
 from app.database.seed_data import seed_database
+from app.ml.registry import registry
 from app.ml.inference.churn_predictor import ChurnInferenceEngine
 from app.ml.inference.segmenter import CustomerSegmenterEngine
 from app.ml.inference.clv_predictor import CLVPredictorEngine
 from app.database.connection import execute_query
+from app.core.logging import logger
 
 from streamlit_app.components.cards import render_metric_card, render_risk_badge, render_segment_badge
 from streamlit_app.components.charts import plot_shap_waterfall
 
 st.set_page_config(page_title="Customer Intelligence | DataMind AI", page_icon="👥", layout="wide")
 
-# Ensure the database is seeded (needed for standalone Streamlit Cloud deployment)
-try:
-    seed_database()
-except Exception:
-    pass
 
+# ── Auto-Initialize (DB + Models) ────────────────────────────────────────────
+@st.cache_resource(show_spinner="⚙️ Initializing ML models for Customer Intelligence...")
+def _boot_customer_intelligence():
+    """Ensures DB is seeded and all required ML models are trained."""
+    # 1. Seed DB
+    try:
+        seed_database()
+    except Exception as e:
+        logger.error(f"DB seed error: {e}")
+
+    # 2. Auto-train any missing models
+    models_needed = [
+        ("churn_champion",               "train_customer_churn_models",   "app.ml.training.train_churn"),
+        ("customer_clv_champion",        "train_clv_model",               "app.ml.training.train_clv"),
+        ("customer_segmentation_kmeans", "train_customer_segmentation",   "app.ml.training.train_segmentation"),
+    ]
+    for model_key, func_name, module_path in models_needed:
+        if registry.get_model(model_key) is None:
+            try:
+                logger.info(f"Auto-training '{model_key}'...")
+                mod = importlib.import_module(module_path)
+                getattr(mod, func_name)()
+                logger.info(f"'{model_key}' trained successfully.")
+            except Exception as e:
+                logger.error(f"Auto-train failed for '{model_key}': {e}")
+    return True
+
+_boot_customer_intelligence()
+
+
+# ── Header ────────────────────────────────────────────────────────────────────
 st.markdown("## 👥 Customer Intelligence & Explainable Churn Suite")
 st.caption("Machine learning churn risk scoring, SHAP explainability, RFM segmentation, and 12-month CLV projections")
 
-# Fetch Customers List for Interactive Selector
+st.info(
+    "📊 **How this works:** This page uses the built-in star-schema database (auto-seeded with realistic "
+    "synthetic customer data on first boot). ML models are trained on that data automatically. "
+    "You do **not** need to upload a file — this is your always-on customer analytics suite.",
+    icon="💡"
+)
+
+# ── Fetch Customer List ───────────────────────────────────────────────────────
 try:
-    cust_df = execute_query("SELECT customer_id, name, email, customer_segment, city, state FROM customers ORDER BY customer_id ASC;")
+    cust_df = execute_query(
+        "SELECT customer_id, name, email, customer_segment, city, state "
+        "FROM customers ORDER BY customer_id ASC;"
+    )
 except Exception as e:
-    st.error("⚠️ Customer data is still loading. Please wait 10 seconds and refresh the page.")
-    st.info("💡 **Tip**: The database is being initialized for the first time on this server. This only takes a moment.")
+    st.error("⚠️ Customer data unavailable. The database may still be initializing.")
+    st.info("💡 Please wait 15 seconds and refresh the page.")
     st.stop()
 
 if cust_df is None or cust_df.empty:
-    st.warning("🚧 No customer records found. The database may still be seeding. Please refresh in 10 seconds.")
+    st.warning("🚧 No customer records found yet. Please refresh in 15 seconds.")
     st.stop()
 
-cust_options = {f"#{row['customer_id']} — {row['name']} ({row['customer_segment']}, {row['city']})": row['customer_id'] for _, row in cust_df.iterrows()}
+cust_options = {
+    f"#{row['customer_id']} — {row['name']} ({row['customer_segment']}, {row['city']})": row["customer_id"]
+    for _, row in cust_df.iterrows()
+}
 
 selected_label = st.selectbox("Select Customer to Analyze:", options=list(cust_options.keys()), index=0)
 selected_cid = cust_options[selected_label]
 
-# Run Inferences
+# ── Run ML Inference ──────────────────────────────────────────────────────────
 with st.spinner("Calculating ML models and SHAP feature attributions..."):
-    churn_res = ChurnInferenceEngine.predict(customer_id=selected_cid)
-    seg_res = CustomerSegmenterEngine.classify(customer_id=selected_cid)
-    clv_res = CLVPredictorEngine.predict(customer_id=selected_cid)
+    churn_res, seg_res, clv_res = None, None, None
+    errors = []
 
-# Customer Metric Cards
+    try:
+        churn_res = ChurnInferenceEngine.predict(customer_id=selected_cid)
+    except Exception as e:
+        errors.append(f"Churn model: {e}")
+
+    try:
+        seg_res = CustomerSegmenterEngine.classify(customer_id=selected_cid)
+    except Exception as e:
+        errors.append(f"Segmentation model: {e}")
+
+    try:
+        clv_res = CLVPredictorEngine.predict(customer_id=selected_cid)
+    except Exception as e:
+        errors.append(f"CLV model: {e}")
+
+if errors:
+    for err in errors:
+        st.warning(f"⚠️ {err}")
+    st.info("🔄 Some models could not run. Try refreshing — models may still be training.")
+
+# ── Metric Cards ──────────────────────────────────────────────────────────────
 c1, c2, c3, c4 = st.columns(4)
+
 with c1:
-    render_metric_card("Churn Probability", f"{churn_res['churn_probability']*100:.1f}%", f"{churn_res['risk_level']} Risk Level", icon="⚠️")
+    if churn_res:
+        risk_color = "inverse" if churn_res["risk_level"] in ("HIGH", "MEDIUM") else "normal"
+        render_metric_card(
+            "Churn Probability",
+            f"{churn_res['churn_probability']*100:.1f}%",
+            f"{churn_res['risk_level']} Risk Level",
+            delta_color=risk_color,
+            icon="⚠️"
+        )
+    else:
+        render_metric_card("Churn Probability", "N/A", "Model loading...", icon="⚠️")
+
 with c2:
-    render_metric_card("12-Month CLV", f"₹{clv_res['predicted_12m_clv']:,.0f}", clv_res['customer_tier'], icon="💎")
+    if clv_res:
+        render_metric_card(
+            "12-Month CLV",
+            f"₹{clv_res['predicted_12m_clv']:,.0f}",
+            f"{clv_res['customer_tier']} Tier",
+            delta_color="normal",
+            icon="💎"
+        )
+    else:
+        render_metric_card("12-Month CLV", "N/A", "Model loading...", icon="💎")
+
 with c3:
-    render_metric_card("RFM Segment", seg_res['segment'], "Behavioral Cluster", icon="🏷️")
+    if seg_res:
+        render_metric_card(
+            "RFM Behavioral Segment",
+            seg_res["segment"],
+            "ML Cluster (Recency, Frequency, Monetary)",
+            delta_color="normal",
+            icon="🏷️"
+        )
+    else:
+        render_metric_card("RFM Behavioral Segment", "N/A", "Model loading...", icon="🏷️")
+
 with c4:
-    render_metric_card("Avg Order Value", f"₹{clv_res['avg_order_value']:,.0f}", "Historical Baseline", icon="🛒")
+    if clv_res:
+        render_metric_card(
+            "Avg Order Value",
+            f"₹{clv_res['avg_order_value']:,.0f}",
+            "Historical Average per Order",
+            delta_color="normal",
+            icon="🛒"
+        )
+    else:
+        render_metric_card("Avg Order Value", "N/A", "Model loading...", icon="🛒")
 
 st.divider()
 
-# Explainable AI & Factor Drivers
-col_left, col_right = st.columns([5, 5])
+# ── SHAP Explainability Panel ─────────────────────────────────────────────────
+if churn_res:
+    col_left, col_right = st.columns([5, 5])
 
-with col_left:
-    st.markdown("### 🧠 Explainable AI: Churn Risk Drivers (SHAP)")
-    st.markdown(f"**Overall Assessment:** {render_risk_badge(churn_res['risk_level'])}", unsafe_allow_html=True)
-    
-    st.markdown("#### 🚨 Key Risk Factors (+ Increasing Churn)")
-    for rf in churn_res["key_risk_factors"]:
-        st.markdown(f"• <span style='color: #f87171; font-weight: 600;'>{rf}</span>", unsafe_allow_html=True)
+    with col_left:
+        st.markdown("### 🧠 Explainable AI: Churn Risk Drivers (SHAP)")
+        st.markdown(
+            f"**Overall Assessment:** {render_risk_badge(churn_res['risk_level'])}",
+            unsafe_allow_html=True
+        )
 
-    st.markdown("#### 🛡️ Positive Protective Factors (- Reducing Churn)")
-    for pf in churn_res["positive_factors"]:
-        st.markdown(f"• <span style='color: #34d399; font-weight: 600;'>{pf}</span>", unsafe_allow_html=True)
+        risk_factors = churn_res.get("key_risk_factors", [])
+        pos_factors  = churn_res.get("positive_factors", [])
 
-    st.markdown("#### 🎯 Prescribed Business Action")
-    st.info(f"**Recommended Strategy:** {churn_res['recommended_action']}")
+        if risk_factors:
+            st.markdown("#### 🚨 Key Risk Factors (→ Increasing Churn)")
+            for rf in risk_factors:
+                st.markdown(f"• <span style='color:#f87171;font-weight:600'>{rf}</span>", unsafe_allow_html=True)
+        else:
+            st.success("✅ No significant churn risk factors identified.")
 
-with col_right:
-    # Render SHAP Waterfall Chart
-    fig_shap = plot_shap_waterfall(churn_res["shap_values"])
-    st.plotly_chart(fig_shap, use_container_width=True)
+        if pos_factors:
+            st.markdown("#### 🛡️ Protective Factors (→ Reducing Churn)")
+            for pf in pos_factors:
+                st.markdown(f"• <span style='color:#34d399;font-weight:600'>{pf}</span>", unsafe_allow_html=True)
+
+        st.markdown("#### 🎯 Prescribed Business Action")
+        st.info(f"**Recommended Strategy:** {churn_res.get('recommended_action', 'N/A')}")
+
+    with col_right:
+        try:
+            fig_shap = plot_shap_waterfall(churn_res["shap_values"])
+            st.plotly_chart(fig_shap, use_container_width=True)
+        except Exception:
+            st.info("SHAP chart unavailable for this customer.")
+
+    # Engagement strategy from segmentation
+    if seg_res and seg_res.get("engagement_strategy"):
+        st.markdown("#### 🤝 Engagement Strategy")
+        st.success(f"**For {seg_res['segment']} customers:** {seg_res['engagement_strategy']}")
 
 st.divider()
 
-# Top At-Risk Customers Requiring Intervention
+# ── Top At-Risk Customers Table ───────────────────────────────────────────────
 st.markdown("### 🚨 Urgent Attention: Top At-Risk Customers")
-st.caption("Customers identified by the ML pipeline with high churn probability and elevated complaint frequency")
+st.caption(
+    "Customers in 'At Risk' or 'Inactive' segments with highest complaint frequency. "
+    "These are sourced from the built-in customer database."
+)
 
 high_risk_query = """
-SELECT 
-    c.customer_id AS "ID",
-    c.name AS "Customer Name",
-    c.email AS "Email",
-    c.customer_segment AS "Segment",
-    c.city AS "City",
-    COUNT(DISTINCT o.order_id) AS "Total Orders",
-    COALESCE(SUM(o.total_amount), 0.0) AS "Total Spent (₹)"
+SELECT
+    c.customer_id                            AS "ID",
+    c.name                                   AS "Customer Name",
+    c.email                                  AS "Email",
+    c.customer_segment                       AS "Segment",
+    c.city                                   AS "City",
+    c.state                                  AS "State",
+    COUNT(DISTINCT o.order_id)               AS "Total Orders",
+    COALESCE(ROUND(SUM(o.total_amount),2), 0) AS "Total Spent (₹)",
+    COUNT(DISTINCT ci.interaction_id)        AS "Complaints"
 FROM customers c
-LEFT JOIN orders o ON c.customer_id = o.customer_id
-WHERE c.customer_segment IN ('At Risk', 'Inactive')
-GROUP BY c.customer_id
-LIMIT 8;
+LEFT JOIN orders o   ON c.customer_id = o.customer_id
+LEFT JOIN customer_interactions ci
+       ON c.customer_id = ci.customer_id AND ci.interaction_type = 'Complaint'
+WHERE c.customer_segment IN ('At Risk', 'Inactive', 'Churned')
+GROUP BY c.customer_id, c.name, c.email, c.customer_segment, c.city, c.state
+ORDER BY "Complaints" DESC, "Total Spent (₹)" DESC
+LIMIT 10;
 """
-df_at_risk = execute_query(high_risk_query)
-st.dataframe(df_at_risk, use_container_width=True)
+
+try:
+    df_at_risk = execute_query(high_risk_query)
+    if df_at_risk is not None and not df_at_risk.empty:
+        st.dataframe(df_at_risk, use_container_width=True)
+    else:
+        # Fallback: show ANY customers with high complaint counts
+        fallback_query = """
+        SELECT
+            c.customer_id   AS "ID",
+            c.name          AS "Customer Name",
+            c.customer_segment AS "Segment",
+            c.city          AS "City",
+            COUNT(DISTINCT ci.interaction_id) AS "Complaints",
+            COALESCE(ROUND(SUM(o.total_amount),2), 0) AS "Total Spent (₹)"
+        FROM customers c
+        LEFT JOIN customer_interactions ci
+               ON c.customer_id = ci.customer_id AND ci.interaction_type = 'Complaint'
+        LEFT JOIN orders o ON c.customer_id = o.customer_id
+        GROUP BY c.customer_id
+        ORDER BY "Complaints" DESC
+        LIMIT 10;
+        """
+        df_fallback = execute_query(fallback_query)
+        if df_fallback is not None and not df_fallback.empty:
+            st.info("ℹ️ No 'At Risk/Inactive' segment customers found. Showing customers with highest complaint counts instead:")
+            st.dataframe(df_fallback, use_container_width=True)
+        else:
+            st.info("ℹ️ No at-risk customer data available yet.")
+except Exception as e:
+    st.warning(f"⚠️ Could not load at-risk customers: {e}")
