@@ -231,5 +231,22 @@ class DatasetManager:
             logger.error(f"Error dropping table '{table_name}': {e}")
             return False
 
+    def clear_all_datasets(self) -> bool:
+        """Removes all custom uploaded datasets and resets active workspace dataset."""
+        try:
+            reg = self._read_registry()
+            datasets = list(reg.get("datasets", {}).keys())
+            with engine.connect() as conn:
+                for tbl in datasets:
+                    conn.execute(text(f"DROP TABLE IF EXISTS {tbl};"))
+                conn.commit()
+            self._save_registry({"active_dataset": None, "datasets": {}})
+            logger.info("Cleared all custom datasets from workspace.")
+            return True
+        except Exception as e:
+            logger.error(f"Error clearing datasets: {e}")
+            return False
+
 
 dataset_manager = DatasetManager()
+

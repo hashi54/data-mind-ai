@@ -140,9 +140,17 @@ st.divider()
 # ─────────────────────────────────────────────────────────────────────────────
 # SECTION 2 — Workspace Datasets List
 # ─────────────────────────────────────────────────────────────────────────────
-st.markdown("### 🗄️ Workspace Datasets")
+h_left, h_right = st.columns([4, 1])
+with h_left:
+    st.markdown("### 🗄️ Workspace Datasets")
+with h_right:
+    all_datasets = dataset_manager.list_datasets()
+    if all_datasets:
+        if st.button("🗑️ Clear All", key="clear_all_workspace", help="Remove all uploaded datasets from workspace"):
+            dataset_manager.clear_all_datasets()
+            st.warning("All custom datasets removed from workspace.")
+            st.rerun()
 
-all_datasets = dataset_manager.list_datasets()
 active_name = dataset_manager.get_active_dataset_name()
 
 if not all_datasets:
