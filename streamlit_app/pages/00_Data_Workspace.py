@@ -92,7 +92,7 @@ with upload_col:
         key="workspace_uploader",
     )
     st.markdown("**Supported formats:** CSV · Excel (.xlsx / .xls, multi-sheet) · JSON", unsafe_allow_html=False)
-    st.markdown("**Max size:** 50 MB per file &nbsp;|&nbsp; **Multiple files:** ✅ Supported", unsafe_allow_html=False)
+    st.markdown("**Max size:** 1 GB (1000 MB) per file &nbsp;|&nbsp; **Multiple files:** ✅ Supported", unsafe_allow_html=False)
     st.markdown('</div>', unsafe_allow_html=True)
 
 with tip_col:
