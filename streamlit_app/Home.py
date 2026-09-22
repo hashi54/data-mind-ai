@@ -24,12 +24,13 @@ from app.core.logging import logger
 # (where models/ is gitignored and containers start empty).
 @st.cache_resource(show_spinner="⚙️ Initializing DataMind AI platform (first boot may take ~60 seconds)...")
 def _initialize_platform():
-    # 1. Seed the database
+    # 1. Initialize database schema
     try:
-        seed_database()
-        logger.info("Database initialized and seeded via Streamlit startup.")
+        from app.database.seed_data import init_db
+        init_db()
+        logger.info("Database schema initialized via Streamlit startup.")
     except Exception as e:
-        logger.error(f"Database seed error on Streamlit startup: {e}")
+        logger.error(f"Database schema init error on Streamlit startup: {e}")
 
     # 2. Auto-train ML models if not already in registry
     models_needed = [

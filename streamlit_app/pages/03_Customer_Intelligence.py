@@ -22,17 +22,15 @@ from streamlit_app.components.charts import plot_shap_waterfall
 st.set_page_config(page_title="Customer Intelligence | DataMind AI", page_icon="👥", layout="wide")
 
 
-# ── Auto-Initialize (DB + Models) ────────────────────────────────────────────
-@st.cache_resource(show_spinner="⚙️ Initializing ML models for Customer Intelligence...")
+# ── Auto-Initialize DB Schema & Models ───────────────────────────────────────
+@st.cache_resource(show_spinner="⚙️ Initializing database schema and ML models...")
 def _boot_customer_intelligence():
-    """Ensures DB is seeded and all required ML models are trained."""
-    # 1. Seed DB
+    """Ensures DB schema exists and required ML models are ready."""
     try:
-        seed_database()
+        init_db()
     except Exception as e:
-        logger.error(f"DB seed error: {e}")
+        logger.error(f"DB schema init error: {e}")
 
-    # 2. Auto-train any missing models
     models_needed = [
         ("churn_champion",               "train_customer_churn_models",   "app.ml.training.train_churn"),
         ("customer_clv_champion",        "train_clv_model",               "app.ml.training.train_clv"),
@@ -41,10 +39,8 @@ def _boot_customer_intelligence():
     for model_key, func_name, module_path in models_needed:
         if registry.get_model(model_key) is None:
             try:
-                logger.info(f"Auto-training '{model_key}'...")
                 mod = importlib.import_module(module_path)
                 getattr(mod, func_name)()
-                logger.info(f"'{model_key}' trained successfully.")
             except Exception as e:
                 logger.error(f"Auto-train failed for '{model_key}': {e}")
     return True
@@ -56,26 +52,38 @@ _boot_customer_intelligence()
 st.markdown("## 👥 Customer Intelligence & Explainable Churn Suite")
 st.caption("Machine learning churn risk scoring, SHAP explainability, RFM segmentation, and 12-month CLV projections")
 
-st.info(
-    "📊 **How this works:** This page uses the built-in star-schema database (auto-seeded with realistic "
-    "synthetic customer data on first boot). ML models are trained on that data automatically. "
-    "You do **not** need to upload a file — this is your always-on customer analytics suite.",
-    icon="💡"
-)
-
 # ── Fetch Customer List ───────────────────────────────────────────────────────
 try:
     cust_df = execute_query(
         "SELECT customer_id, name, email, customer_segment, city, state "
         "FROM customers ORDER BY customer_id ASC;"
     )
-except Exception as e:
-    st.error("⚠️ Customer data unavailable. The database may still be initializing.")
-    st.info("💡 Please wait 15 seconds and refresh the page.")
-    st.stop()
+except Exception:
+    cust_df = pd.DataFrame()
 
 if cust_df is None or cust_df.empty:
-    st.warning("🚧 No customer records found yet. Please refresh in 15 seconds.")
+    st.markdown("""
+    <div style="text-align:center; padding:70px 20px;">
+        <div style="font-size:3.5rem;">👥</div>
+        <div style="font-size:1.4rem; font-weight:700; color:#94a3b8; margin-top:12px;">No Customer Dataset Loaded</div>
+        <div style="color:#64748b; font-size:0.95rem; margin-top:8px; max-width:550px; margin-left:auto; margin-right:auto;">
+            Go to <strong>📂 Data Workspace</strong> in the sidebar and upload your company's customer CSV or Excel file. 
+            Once uploaded, select your active customer dataset to calculate ML churn risk, SHAP drivers, and CLV projections.
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    st.divider()
+    
+    # Optional button for users who DO want to load sample demo data
+    c1, c2, c3 = st.columns([1, 2, 1])
+    with c2:
+        st.markdown("<div style='text-align:center; color:#94a3b8; font-size:0.9rem;'>Want to test the feature with sample data first?</div>", unsafe_allow_html=True)
+        if st.button("🚀 Load Sample Enterprise Customer Dataset", use_container_width=True):
+            with st.spinner("Generating sample customer enterprise data..."):
+                seed_database()
+                st.success("Sample customer dataset loaded successfully!")
+                st.rerun()
     st.stop()
 
 cust_options = {
