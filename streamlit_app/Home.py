@@ -20,23 +20,54 @@ from app.rag.pipeline import RAGPipeline
 from app.core.logging import logger
 
 # ── One-Time Startup Initialization (runs once per Streamlit session/boot) ────
-# This ensures the database is seeded and RAG is indexed even when running
-# without FastAPI (e.g. Streamlit Cloud, standalone hosting)
-@st.cache_resource(show_spinner="⚙️ Initializing DataMind AI platform...")
+# Ensures DB, ML models and RAG are all ready even on Streamlit Cloud
+# (where models/ is gitignored and containers start empty).
+@st.cache_resource(show_spinner="⚙️ Initializing DataMind AI platform (first boot may take ~60 seconds)...")
 def _initialize_platform():
+    # 1. Seed the database
     try:
         seed_database()
         logger.info("Database initialized and seeded via Streamlit startup.")
     except Exception as e:
         logger.error(f"Database seed error on Streamlit startup: {e}")
+
+    # 2. Auto-train ML models if not already in registry
+    models_needed = [
+        ("churn_champion", "train_customer_churn_models",
+         "app.ml.training.train_churn"),
+        ("sales_forecast_champion", "train_sales_forecasting_models",
+         "app.ml.training.train_forecasting"),
+        ("customer_clv_champion", "train_clv_model",
+         "app.ml.training.train_clv"),
+        ("customer_segmentation_kmeans", "train_customer_segmentation",
+         "app.ml.training.train_segmentation"),
+    ]
+    for model_key, func_name, module_path in models_needed:
+        try:
+            existing = registry.get_model(model_key)
+            if existing is None:
+                logger.info(f"Model '{model_key}' not found — auto-training now...")
+                import importlib
+                mod = importlib.import_module(module_path)
+                train_fn = getattr(mod, func_name)
+                train_fn()
+                logger.info(f"Model '{model_key}' trained and registered successfully.")
+            else:
+                logger.info(f"Model '{model_key}' already registered — skipping training.")
+        except Exception as e:
+            logger.error(f"Auto-training failed for '{model_key}': {e}")
+
+    # 3. Index RAG knowledge base
     try:
         RAGPipeline.index_knowledge_base()
         logger.info("RAG knowledge base indexed via Streamlit startup.")
     except Exception as e:
         logger.error(f"RAG indexing error on Streamlit startup: {e}")
+
     return True
 
 _initialize_platform()
+
 
 # ── Page Config ─────────────────────────────────────────────────────────────
 st.set_page_config(
