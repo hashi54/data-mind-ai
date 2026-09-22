@@ -48,15 +48,27 @@ with st.sidebar:
     horizon = st.select_slider("Forecast Horizon (days)", options=[7, 14, 30, 60, 90, 180, 365], value=30, key="fc_horizon")
 
 if not sel_date or not sel_metric:
-    st.warning("Please select a date column and a numeric metric column in the sidebar.")
+    st.warning("⚠️ Please select a date column and a numeric metric column in the sidebar.")
+    st.stop()
+
+if sel_date == sel_metric:
+    st.warning(
+        f"⚠️ **Column Selection Mismatch:** You selected `{sel_metric}` as both the Date column and the Metric to forecast. "
+        "Please select a **time/date column** for Date and a **numeric value column** (like Sales, Amount, Revenue) for Metric.",
+        icon="⚠️"
+    )
     st.stop()
 
 # ── Run Forecast ─────────────────────────────────────────────────────────────
 with st.spinner(f"Training forecast model on `{active_name}` → predicting next {horizon} days..."):
     try:
         result = DynamicAnalyticsEngine.run_dynamic_forecast(df, date_col=sel_date, metric_col=sel_metric, horizon_days=horizon)
-    except ValueError as e:
-        st.error(str(e))
+    except Exception as e:
+        st.warning(
+            f"💡 **Forecast Notice:** Could not generate time-series forecast for column `{sel_metric}` with date `{sel_date}`.\n\n"
+            f"**Reason:** Continuous time-series data is required. Please pick a numerical value column (e.g. Sales, Amount, Revenue) in the sidebar settings.",
+            icon="💡"
+        )
         st.stop()
 
 # ── KPI Cards ────────────────────────────────────────────────────────────────

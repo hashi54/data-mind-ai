@@ -40,18 +40,60 @@ metric_col = roles["primary_metric"]
 # Sidebar column selectors
 with st.sidebar:
     st.markdown("#### 🎛️ Anomaly Settings")
-    all_cols      = list(df.columns)
-    date_options  = [c for c in all_cols if "date" in c.lower() or "time" in c.lower()] or all_cols
-    metric_options = [c for c in all_cols if pd.api.types.is_numeric_dtype(df[c])]
+    all_cols = list(df.columns)
+    
+    # 1. Filter Date options strictly to date-like columns
+    date_candidates = [c for c in all_cols if any(k in c.lower() for k in ["date", "time", "day", "month", "year", "created", "updated", "dt", "timestamp"])]
+    if not date_candidates:
+        date_candidates = all_cols
+        
+    # 2. Filter Metric options strictly to numeric columns (excluding ID columns)
+    metric_candidates = [c for c in all_cols if pd.api.types.is_numeric_dtype(df[c])]
+    if not metric_candidates:
+        metric_candidates = all_cols
 
-    sel_date   = st.selectbox("Date Column (optional)", ["(auto-detect)"] + date_options, key="anom_date")
-    sel_metric = st.selectbox("Metric to Analyse", metric_options if metric_options else all_cols, key="anom_metric")
+    sel_date = st.selectbox(
+        "Date Column (optional)", 
+        ["(auto-detect)"] + date_candidates, 
+        index=0,
+        key="anom_date"
+    )
+    
+    # Pre-select infered primary metric if available
+    default_metric_idx = 0
+    if metric_col in metric_candidates:
+        default_metric_idx = metric_candidates.index(metric_col)
+
+    sel_metric = st.selectbox(
+        "Metric to Analyse", 
+        metric_candidates, 
+        index=default_metric_idx, 
+        key="anom_metric"
+    )
+
     if sel_date == "(auto-detect)":
         sel_date = date_col
 
+# ── Validation Check ─────────────────────────────────────────────────────────
+if sel_date == sel_metric:
+    st.warning(
+        f"⚠️ **Column Selection Mismatch:** You selected `{sel_metric}` as both the Date column and the Metric to analyze. "
+        "Please select a **time/date column** for Date and a **numeric value column** (like Revenue, Amount, Sales, Quantity) for Metric.",
+        icon="⚠️"
+    )
+    st.stop()
+
 # ── Run Anomaly Detection ─────────────────────────────────────────────────────
-with st.spinner("Scanning your dataset for anomalies..."):
-    result = DynamicAnalyticsEngine.run_dynamic_anomalies(df, date_col=sel_date, metric_col=sel_metric)
+try:
+    with st.spinner("Scanning your dataset for anomalies..."):
+        result = DynamicAnalyticsEngine.run_dynamic_anomalies(df, date_col=sel_date, metric_col=sel_metric)
+except Exception as e:
+    st.warning(
+        f"💡 **Analysis Notice:** Cannot compute rolling anomaly statistics for column `{sel_metric}` with date `{sel_date}`.\n\n"
+        f"**Reason:** `{sel_metric}` may not contain variable continuous metrics. Please pick a numerical value column (e.g. Sales, Amount, Price) in the sidebar settings.",
+        icon="💡"
+    )
+    st.stop()
 
 anomalies     = result["anomalies"]
 total_anomalies = result["total_anomalies_detected"]
